@@ -29,7 +29,7 @@ class AuditLog:
         os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(entry)
-        print(f" Logged: {action} by {user}")
+        print(f"📝 Logged: {action} by {user}")
 
 def load_conversion_table() -> Dict[str, float]:
     try:
@@ -59,7 +59,11 @@ def load_recipes() -> Dict:
         recipe = Recipe(rid, rdata["name"], rdata.get("category", "General"), rdata["base_servings"])
         for vdata in rdata.get("versions", []):
             ingredients = [Ingredient.from_dict(i) for i in vdata["ingredients"]]
+            
             rules = []
+            for r in vdata.get("non_linear_rules", []):
+                rules.append(NonLinearRule(r["ingredient_name"], r["max_multiplier"], r["threshold"]))
+            
             version = RecipeVersion(
                 vdata["version_id"], rid, ingredients, rules,
                 vdata["base_servings"], vdata["mutti_approved"],
@@ -123,10 +127,11 @@ def main():
             target = int(input("Portions (10-1000): "))
             cached = cache.get(rid, target)
             if cached:
-                print("\n")
+                print("\n⚡ Cache hit (fast response)")
                 scaled = cached
             else:
-                scaled = recipe.scale(target, current_user.role.value)
+                # FIXED: use role.name instead of role.value
+                scaled = recipe.scale(target, current_user.role.name)
                 cache.set(rid, target, scaled)
 
             print("\nScaled Recipe Sheet:")
@@ -221,14 +226,16 @@ def main():
                 target = int(input("Target Portion Size (10-1000): "))
                 cached = cache.get(rid, target)
                 if cached:
-                    print("\n")
+                    print("\n⚡ Cache hit (fast response)")
                     scaled = cached
                 else:
-                    scaled = recipe.scale(target, current_user.role.value)
+                    # FIXED: use role.name instead of role.value
+                    scaled = recipe.scale(target, current_user.role.name)
                     cache.set(rid, target, scaled)
                 
                 print("\n" + "=" * 50)
-                print(recipe.get_info_scaled(target, current_user.role.value))
+                # FIXED: use role.name instead of role.value
+                print(recipe.get_info_scaled(target, current_user.role.name))
                 print(recipe.expected_yield(target))
                 print("=" * 50)
                 AuditLog.log("SCALE", current_user.username, f"Scaled {rid} to {target} portions")
@@ -262,7 +269,7 @@ def main():
                 print("You are already authenticated with Administrator privileges.")
                 continue
             
-            temp_admin = emergency_break_glass(AuditLog.log)
+            temp_admin = emergency_break_glass()
             if temp_admin:
                 current_user = temp_admin
                 print(f"✔ Active privileges upgraded to: {current_user.role.value}")

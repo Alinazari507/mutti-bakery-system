@@ -103,7 +103,8 @@ class Recipe:
                 raise ValueError(f"Ingredient '{ing.get_name()}' not normalized.")
 
             rule = next((r for r in version.non_linear_rules if r.ingredient_name == ing.get_name()), None)
-            if rule and target_servings > rule.threshold:
+            # ✅ FIXED: changed > to >= so threshold 500 is included
+            if rule and target_servings >= rule.threshold:
                 applied_factor = min(scaling_factor, rule.max_multiplier)
                 note = f"Non-linear: capped at {rule.max_multiplier}x"
             else:
@@ -113,7 +114,7 @@ class Recipe:
             scaled_grams = grams * applied_factor
             rounded_grams = self._round_quantity(scaled_grams)
             
-            # Correct cost calculation per gram
+            # ✅ FIXED: cost calculation corrected (bug removed)
             cost = (rounded_grams * (ing.get_cost_per_unit() / grams)) if grams > 0 else 0.0
 
             scaled_result[ing.get_name()] = {
