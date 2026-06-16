@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from ingredient import Ingredient
 
+
 class NonLinearRule:
     """Limits structural multipliers for specific sensitive raw materials."""
     def __init__(self, ingredient_name: str, max_multiplier: float, threshold_servings: int):
@@ -24,6 +25,7 @@ class NonLinearRule:
             max_multiplier=data["max_multiplier"],
             threshold=data["threshold"]
         )
+
 
 class RecipeVersion:
     """Historical tracking model to map version indices, audit logs, and approval metadata."""
@@ -51,6 +53,7 @@ class RecipeVersion:
             "timestamp": self.timestamp
         }
 
+
 class Recipe:
     """Main recipe object controlling historical iterations and scaling parameters."""
     def __init__(self, recipe_id: str, name: str, category: str, base_servings: int):
@@ -61,11 +64,20 @@ class Recipe:
         self._versions: List[RecipeVersion] = []
         self._current_version_id = 0
 
-    def get_recipe_id(self) -> str: return self._recipe_id
-    def get_name(self) -> str: return self._name
-    def get_category(self) -> str: return self._category
-    def get_base_servings(self) -> int: return self._base_servings
-    def get_versions(self) -> List[RecipeVersion]: return list(self._versions)
+    def get_recipe_id(self) -> str:
+        return self._recipe_id
+
+    def get_name(self) -> str:
+        return self._name
+
+    def get_category(self) -> str:
+        return self._category
+
+    def get_base_servings(self) -> int:
+        return self._base_servings
+
+    def get_versions(self) -> List[RecipeVersion]:
+        return list(self._versions)
 
     def get_current_version(self) -> Optional[RecipeVersion]:
         return self._versions[-1] if self._versions else None
@@ -83,6 +95,10 @@ class Recipe:
         self._current_version_id = new_id
         return version
 
+    # ============================================================
+    # FIXED: scale method with correct order of operations
+    # (cap applied before rounding, then cap re-checked after rounding)
+    # ============================================================
     def scale(self, target_servings: int, user_role: str) -> Dict[str, Any]:
         version = self.get_current_version()
         if not version:
@@ -103,18 +119,27 @@ class Recipe:
                 raise ValueError(f"Ingredient '{ing.get_name()}' not normalized.")
 
             rule = next((r for r in version.non_linear_rules if r.ingredient_name == ing.get_name()), None)
-            # ✅ FIXED: changed > to >= so threshold 500 is included
+
+            # Step 1: raw linear scaling
+            scaled_grams = grams * scaling_factor
+
+            # Step 2: apply non-linear cap (before rounding)
             if rule and target_servings >= rule.threshold:
-                applied_factor = min(scaling_factor, rule.max_multiplier)
+                max_allowed = grams * rule.max_multiplier
+                scaled_grams = min(scaled_grams, max_allowed)
                 note = f"Non-linear: capped at {rule.max_multiplier}x"
             else:
-                applied_factor = scaling_factor
                 note = "Linear scaling"
 
-            scaled_grams = grams * applied_factor
+            # Step 3: rounding (FR-08)
             rounded_grams = self._round_quantity(scaled_grams)
-            
-            # ✅ FIXED: cost calculation corrected (bug removed)
+
+            # Step 4: ensure rounded value does NOT exceed the cap
+            if rule and target_servings >= rule.threshold:
+                max_allowed = grams * rule.max_multiplier
+                rounded_grams = min(rounded_grams, max_allowed)
+
+            # cost calculation (unchanged)
             cost = (rounded_grams * (ing.get_cost_per_unit() / grams)) if grams > 0 else 0.0
 
             scaled_result[ing.get_name()] = {
@@ -125,6 +150,7 @@ class Recipe:
                 "unit": "g",
                 "note": note
             }
+
         return scaled_result
 
     def calculate_cost(self, target_servings: int, user_role: str) -> float:
@@ -135,13 +161,16 @@ class Recipe:
             return 0.0
 
     def _round_quantity(self, grams: float) -> float:
-        if grams < 5: return round(grams * 2) / 2.0
-        if grams <= 100: return round(grams / 5) * 5
+        if grams < 5:
+            return round(grams * 2) / 2.0
+        if grams <= 100:
+            return round(grams / 5) * 5
         return round(grams / 10) * 10
 
     def expected_yield(self, target_servings: int, piece_weight_grams: float = 65) -> str:
         version = self.get_current_version()
-        if not version: return "No versions available."
+        if not version:
+            return "No versions available."
         total_grams = sum(i.get_normalized_grams() or 0.0 for i in version.ingredients)
         scaled_total_weight = total_grams * (target_servings / self._base_servings)
         pieces = scaled_total_weight / piece_weight_grams
