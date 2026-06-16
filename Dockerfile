@@ -26,14 +26,11 @@ ENV PYTHONPATH=/app
 # Security: Create non-root system group and user
 RUN groupadd -r bakery && useradd -r -g bakery bakery
 
-# Set ownership to the new user
-RUN chown -R bakery:bakery /app/logs /app/data
+# Change ownership of the app directory to the bakery user
+RUN chown -R bakery:bakery /app
 
 # Switch to non-root user
 USER bakery
 
-# Define volumes for persistent data
-VOLUME ["/app/logs", "/app/data"]
-
-# Run the application
+# Default command to run the application
 CMD ["python", "src/main.py"]
